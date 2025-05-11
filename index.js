@@ -1,105 +1,87 @@
-const { Client, Intents } = require('discord.js');
+const { Client, ActivityType } = require('discord.js');
+const { Connection, PublicKey } = require('@solana/web3.js');
+const { getAccount, getMint } = require('@solana/spl-token');
 const axios = require('axios');
 require('dotenv').config();
-const client = new Client({ intents: [Intents.FLAGS.GUILDS] });
-const token = process.env.TOKEN;
-const address = process.env.ADDRESS;
 
-const switchDelay = 15000; // 15 seconds
-const retryDelay = 30000; // 30 seconds
-
-async function fetchSolBalance() {
-  const requestData = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'getBalance',
-    params: [address]
-  };
-
-  try {
-    const response = await axios.post('https://api.mainnet-beta.solana.com', requestData);
-    const solBalance = (response.data.result.value / 1e9).toFixed(2);
-    console.log(`SOL Balance: ${solBalance}`);
-    client.user.setPresence({
-      activities: [{ name: `${solBalance} SOL`, type: 'WATCHING' }],
-      status: 'dnd'
-    });
-    setTimeout(fetchUsdcBalance, switchDelay); // Switch to USDC after 15 seconds
-  } catch (error) {
-    console.error(error);
-    setTimeout(fetchSolBalance, retryDelay); // Retry after 30 seconds
-  }
-}
-
-async function fetchUsdcBalance() {
-  const requestData = {
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'getTokenAccountsByOwner',
-    params: [
-      address,
-      {
-        mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-      },
-      {
-        encoding: 'jsonParsed'
-      }
-    ]
-  };
-
-  try {
-    const response = await axios.post('https://api.mainnet-beta.solana.com', requestData);
-    const amounts = response.data.result.value.map(account => account.account.data.parsed.info.tokenAmount.amount);
-    const totalAmount = amounts.reduce((total, amount) => total + parseInt(amount), 0);
-    const usdcBalance = (totalAmount / 1e6).toFixed(2);
-    console.log(`USDC Balance: ${usdcBalance}`);
-    client.user.setPresence({
-      activities: [{ name: `${usdcBalance} USDC`, type: 'WATCHING' }],
-      status: 'dnd'
-    });
-    setTimeout(fetchUsdtBalance, switchDelay); // Switch to USDT after 15 seconds
-  } catch (error) {
-    console.error(error);
-    setTimeout(fetchUsdcBalance, retryDelay); // Retry after 30 seconds
-  }
-}
-
-async function fetchUsdtBalance() {
-  const requestData = {
-    jsonrpc: '2.0',
-    id: 3,
-    method: 'getTokenAccountsByOwner',
-    params: [
-      address,
-      {
-        mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
-      },
-      {
-        encoding: 'jsonParsed'
-      }
-    ]
-  };
-
-  try {
-    const response = await axios.post('https://api.mainnet-beta.solana.com', requestData);
-    const amounts = response.data.result.value.map(account => account.account.data.parsed.info.tokenAmount.amount);
-    const totalAmount = amounts.reduce((total, amount) => total + parseInt(amount), 0);
-    const usdtBalance = (totalAmount / 1e6).toFixed(2);
-    console.log(`USDT Balance: ${usdtBalance}`);
-    client.user.setPresence({
-      activities: [{ name: `${usdtBalance} USDT`, type: 'WATCHING' }],
-      status: 'dnd'
-    });
-    setTimeout(fetchSolBalance, switchDelay); // Switch to SOL after 15 seconds
-  } catch (error) {
-    console.error(error);
-    setTimeout(fetchUsdtBalance, retryDelay); // Retry after 30 seconds
-  }
-}
-
-client.on('ready', async () => {
-  console.log('Bot is ready!');
-  await fetchSolBalance(); // Start with SOL
+const client = new Client({ 
+  intents: ['Guilds'] 
 });
 
-client.login(token);
+const SOLANA_CONNECTION = new Connection('https://api.mainnet-beta.solana.com');
+const SWITCH_DELAY = 15000; // 15 seconds
+const RETRY_DELAY = 30000; // 30 seconds
+const TOKENS = {
+  SOL: { decimals: 9 },
+  USDC: { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 },
+  USDT: { mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6 }
+};
+
+let currentTokenIndex = 0;
+
+async function updatePresence(balance, symbol) {
+  client.user.setPresence({
+    activities: [{
+      name: `${balance} ${symbol}`,
+      type: ActivityType.Watching
+    }],
+    status: 'dnd'
+  });
+}
+
+async function fetchNativeBalance() {
+  try {
+    const balance = await SOLANA_CONNECTION.getBalance(new PublicKey(process.env.ADDRESS));
+    const solBalance = (balance / 10 ** TOKENS.SOL.decimals).toFixed(2);
+    await updatePresence(solBalance, 'SOL');
+    console.log(`Updated SOL balance: ${solBalance}`);
+  } catch (error) {
+    console.error('SOL Balance Error:', error.message);
+    setTimeout(fetchNativeBalance, RETRY_DELAY);
+    return;
+  }
+  scheduleNextUpdate();
+}
+
+async function fetchTokenBalance(mintAddress, decimals, symbol) {
+  try {
+    const tokenAccounts = await SOLANA_CONNECTION.getTokenAccountsByOwner(
+      new PublicKey(process.env.ADDRESS),
+      { mint: new PublicKey(mintAddress) }
+    );
+
+    const totalBalance = tokenAccounts.value.reduce((acc, { account }) => {
+      const accountInfo = getAccount(account);
+      return acc + Number(accountInfo.amount);
+    }, 0);
+
+    const formattedBalance = (totalBalance / 10 ** decimals).toFixed(2);
+    await updatePresence(formattedBalance, symbol);
+    console.log(`Updated ${symbol} balance: ${formattedBalance}`);
+  } catch (error) {
+    console.error(`${symbol} Balance Error:`, error.message);
+    setTimeout(() => fetchTokenBalance(mintAddress, decimals, symbol), RETRY_DELAY);
+    return;
+  }
+  scheduleNextUpdate();
+}
+
+function scheduleNextUpdate() {
+  currentTokenIndex = (currentTokenIndex + 1) % Object.keys(TOKENS).length;
+  const nextToken = Object.values(TOKENS)[currentTokenIndex];
+  
+  setTimeout(() => {
+    if (nextToken.mint) {
+      fetchTokenBalance(nextToken.mint, nextToken.decimals, Object.keys(TOKENS)[currentTokenIndex]);
+    } else {
+      fetchNativeBalance();
+    }
+  }, SWITCH_DELAY);
+}
+
+client.once('ready', () => {
+  console.log(`Logged in as ${client.user.tag}!`);
+  fetchNativeBalance();
+});
+
+client.login(process.env.TOKEN);
