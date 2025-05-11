@@ -4,7 +4,6 @@
 A Discord bot that monitors Solana wallet balances (SOL/USDC/USDT) and displays them as status updates. Built with Node.js, Discord.js, and Solana Web3.js.
 
 ![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.x-brightgreen)
-![License](https://img.shields.io/badge/license-MIT-blue)
 
 ## Features ✨
 - Real-time SOL balance tracking
