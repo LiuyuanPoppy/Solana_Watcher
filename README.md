@@ -1,5 +1,5 @@
 
-# Solana Wallet Tracker Bot 🔍
+# Solana Wallet Tracker Bot 
 
 A Discord bot that monitors Solana wallet balances (SOL/USDC/USDT) and displays them as status updates. Built with Node.js, Discord.js, and Solana Web3.js.
 
